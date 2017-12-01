@@ -50,16 +50,19 @@ extension NeoVimView {
     self.xOffset = floor((size.width - self.cellSize.width * CGFloat(discreteSize.width)) / 2)
     self.yOffset = floor((size.height - self.cellSize.height * CGFloat(discreteSize.height)) / 2)
 
-    self.agent.resize(toWidth: Int32(discreteSize.width), height: Int32(discreteSize.height))
+    self.nvim.uiTryResize(width: discreteSize.width, height: discreteSize.height)
   }
 
   fileprivate func launchNeoVim(_ size: Size) {
     self.logger.info("=== Starting neovim...")
     let noErrorDuringInitialization = self.agent.runLocalServerAndNeoVim(withWidth: size.width, height: size.height)
 
-    self.agent.vimCommand("set mouse=a")
-    self.agent.vimCommand("set title")
-    self.agent.vimCommand("set termguicolors")
+    self.nvim.connect()
+
+    // We probably should set the following in a .vim file. Otherwise the start screen doesn't get shown.
+    self.nvim.setOption(name: "mouse", value: .string("a"))
+    self.nvim.setOption(name: "title", value: .bool(true))
+    self.nvim.setOption(name: "termguicolors", value: .bool(true))
 
     if noErrorDuringInitialization == false {
       self.logger.fault("There was an error launching neovim.")

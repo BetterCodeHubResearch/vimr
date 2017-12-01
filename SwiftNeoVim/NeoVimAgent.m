@@ -157,6 +157,9 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
 }
 
 - (void)closeMachPorts {
+  CFRunLoopStop(_localServerRunLoop);
+  [_localServerThread cancel];
+
   if (CFMessagePortIsValid(_remoteServerPort)) {
     CFMessagePortInvalidate(_remoteServerPort);
   }
@@ -168,9 +171,6 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   }
   CFRelease(_localServerPort);
   _localServerPort = NULL;
-
-  CFRunLoopStop(_localServerRunLoop);
-  [_localServerThread cancel];
 }
 
 -(void)forceExitNeoVimServer {
@@ -210,7 +210,8 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   _neoVimServerTask.arguments = shellArgs;
   [_neoVimServerTask launch];
 
-  NSString *cmd = [NSString stringWithFormat:@"exec \"%@\" '%@' '%@'",
+  NSString *cmd = [NSString stringWithFormat:@"NVIM_LISTEN_ADDRESS=%@ exec \"%@\" '%@' '%@'",
+                                             [NSString stringWithFormat:@"/tmp/vimr_%@.sock", _uuid],
                                              [self neoVimServerExecutablePath],
                                              [self localServerName],
                                              [self remoteServerName]];
@@ -221,6 +222,8 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
     }
     cmd = [cmd stringByAppendingFormat:@" %@", [args componentsJoinedByString:@" "]];
   }
+
+  cmd = [cmd stringByAppendingString:@" --headless"];
 
   NSFileHandle *writeHandle = inputPipe.fileHandleForWriting;
   [writeHandle writeData:[cmd dataUsingEncoding:NSUTF8StringEncoding]];
@@ -265,24 +268,6 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   return pwd;
 }
 
-- (void)vimCommand:(NSString *)string {
-  NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
-  [self sendMessageWithId:NeoVimAgentMsgIdCommand data:data expectsReply:NO];
-}
-
-- (NSString *)vimCommandOutput:(NSString *)string {
-  NSData *data = [self sendMessageWithId:NeoVimAgentMsgIdCommandOutput
-                                    data:[string dataUsingEncoding:NSUTF8StringEncoding]
-                            expectsReply:YES];
-
-  if (data == nil) {
-    return nil;
-  }
-
-  NSString *result = [NSKeyedUnarchiver unarchiveObjectWithData:data];
-  return [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
 - (void)vimInput:(NSString *)string {
   NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
   [self sendMessageWithId:NeoVimAgentMsgIdInput data:data expectsReply:NO];
@@ -298,29 +283,6 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   [self sendMessageWithId:NeoVimAgentMsgIdDelete data:data expectsReply:NO];
 }
 
-- (void)resizeToWidth:(int)width height:(int)height {
-  int values[] = {width, height};
-  NSData *data = [[NSData alloc] initWithBytes:values length:(2 * sizeof(int))];
-  [self sendMessageWithId:NeoVimAgentMsgIdResize data:data expectsReply:NO];
-}
-
-- (void)cursorGoToRow:(int)row column:(int)column {
-  int values[] = {row, column};
-  NSData *data = [[NSData alloc] initWithBytes:values length:(2 * sizeof(int))];
-  [self sendMessageWithId:NeoVimAgentMsgIdCursorGoto data:data expectsReply:NO];
-}
-
-- (bool)hasDirtyDocs {
-  NSData *response = [self sendMessageWithId:NeoVimAgentMsgIdGetDirtyDocs data:nil expectsReply:YES];
-  if (response == nil) {
-    log4Warn("The response for the msg %ld was nil.", (long) NeoVimAgentMsgIdGetDirtyDocs);
-    return NO;
-  }
-
-  NSNumber *value = [NSKeyedUnarchiver unarchiveObjectWithData:response];
-  return (bool) value.boolValue;
-}
-
 - (NSString *)escapedFileName:(NSString *)fileName {
   NSArray<NSString *> *fileNames = [self escapedFileNames:@[fileName]];
   if (fileNames.count == 0) {
@@ -328,28 +290,6 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   }
 
   return fileNames[0];
-}
-
-- (NSNumber *)boolOption:(NSString *)option {
-  NSData *data = [option dataUsingEncoding:NSUTF8StringEncoding];
-  NSData *resultData = [self sendMessageWithId:NeoVimAgentMsgIdGetBoolOption data:data expectsReply:YES];
-  if (resultData == nil) {
-    return nil;
-  }
-
-  return [NSKeyedUnarchiver unarchiveObjectWithData:resultData];
-}
-
-- (void)setBoolOption:(NSString *)option to:(bool)value {
-  NSMutableData *data = [NSMutableData new];
-
-  bool values[] = {value};
-  const char *cstr = [option cStringUsingEncoding:NSUTF8StringEncoding];
-
-  [data appendBytes:values length:sizeof(bool)];
-  [data appendBytes:cstr length:strlen(cstr)];
-
-  [self sendMessageWithId:NeoVimAgentMsgIdSetBoolOption data:data expectsReply:YES];
 }
 
 - (void)focusGained:(bool)gained {
@@ -364,37 +304,11 @@ static CFDataRef local_server_callback(CFMessagePortRef local __unused, SInt32 m
   [self sendMessageWithId:NeoVimAgentMsgIdScroll data:data expectsReply:NO];
 }
 
-- (void)selectWindow:(NeoVimWindow *)window {
-  int values[] = {(int) window.handle};
-  NSData *data = [[NSData alloc] initWithBytes:values length:sizeof(int)];
-  [self sendMessageWithId:NeoVimAgentMsgIdSelectWindow data:data expectsReply:NO];
-}
-
 - (NSArray <NSString *> *)escapedFileNames:(NSArray <NSString *> *)fileNames {
   NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fileNames];
   NSData *response = [self sendMessageWithId:NeoVimAgentMsgIdGetEscapeFileNames data:data expectsReply:YES];
   if (response == nil) {
     log4Warn("The response for the msg %ld was nil.", (long) NeoVimAgentMsgIdGetEscapeFileNames);
-    return @[];
-  }
-
-  return [NSKeyedUnarchiver unarchiveObjectWithData:response];
-}
-
-- (NSArray <NeoVimBuffer *> *)buffers {
-  NSData *response = [self sendMessageWithId:NeoVimAgentMsgIdGetBuffers data:nil expectsReply:YES];
-  if (response == nil) {
-    log4Warn("The response for the msg %ld was nil.", (long) NeoVimAgentMsgIdGetBuffers);
-    return @[];
-  }
-
-  return [NSKeyedUnarchiver unarchiveObjectWithData:response];
-}
-
-- (NSArray<NeoVimWindow *> *)tabs {
-  NSData *response = [self sendMessageWithId:NeoVimAgentMsgIdGetTabs data:nil expectsReply:YES];
-  if (response == nil) {
-    log4Warn("The response for the msg %ld was nil.", (long) NeoVimAgentMsgIdGetTabs);
     return @[];
   }
 

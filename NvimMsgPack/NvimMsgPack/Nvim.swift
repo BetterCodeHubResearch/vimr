@@ -8,36 +8,48 @@ import MsgPackRpc
 
 public class Nvim {
 
-  public struct Buffer {
+  public struct Buffer: Equatable {
+
+    public static func ==(lhs: Buffer, rhs: Buffer) -> Bool {
+      return lhs.handle == rhs.handle
+    }
 
     public let handle: Int
 
-    init(_ handle: Int) {
+    public init(_ handle: Int) {
       self.handle = handle
     }
   }
 
-  public struct Window {
+  public struct Window: Equatable {
+
+    public static func ==(lhs: Window, rhs: Window) -> Bool {
+      return lhs.handle == rhs.handle
+    }
 
     public let handle: Int
 
-    init(_ handle: Int) {
+    public init(_ handle: Int) {
       self.handle = handle
     }
   }
 
-  public struct Tabpage {
+  public struct Tabpage: Equatable {
+
+    public static func ==(lhs: Tabpage, rhs: Tabpage) -> Bool {
+      return lhs.handle == rhs.handle
+    }
 
     public let handle: Int
 
-    init(_ handle: Int) {
+    public init(_ handle: Int) {
       self.handle = handle
     }
   }
 
   public struct Error: Swift.Error, CustomStringConvertible {
 
-    public let type: Int
+    public let type: ErrorType
     public let message: String
 
     public var description: String {
@@ -45,13 +57,23 @@ public class Nvim {
     }
 
     init(_ message: String) {
-      self.type = -1
+      self.type = .unknown
+      self.message = message
+    }
+
+    public init(type: ErrorType, message: String) {
+      self.type = type
       self.message = message
     }
 
     init(_ value: Nvim.Value?) {
-      self.type = Int(value?.arrayValue?[0].unsignedIntegerValue ?? 0)
-      self.message = value?.arrayValue?[1].stringValue ?? "ERROR: \(Error.self) could not be instantiated."
+      if let rawValue = value?.unsignedIntegerValue {
+        self.type = ErrorType(rawValue: Int(rawValue)) ?? .unknown
+      } else {
+        self.type = .unknown
+      }
+      self.message = value?.arrayValue?[1].stringValue
+                     ?? "ERROR: \(Error.self) could not be instantiated from \(String(describing: value))"
     }
   }
 
@@ -129,6 +151,14 @@ public class Nvim {
       self.connection = connection
     }
 
+    public func run() {
+      self.connection.run()
+    }
+
+    public func stop() {
+      self.connection.stop()
+    }
+
     public func rpc(method: String,
              params: [MsgPackRpc.Value],
              expectsReturnValue: Bool) -> Result<MsgPackRpc.Value, Nvim.Error> {
@@ -176,6 +206,23 @@ public class Nvim {
     self.session = session
   }
 
+  public func connect() {
+    self.session.run()
+  }
+
+  public func disconnect() {
+    self.session.stop()
+  }
+
+  @discardableResult
+  public func checkBlocked<T>(_ fn: () -> Nvim.Response<T>) -> Nvim.Response<T> {
+    if self.getMode().value?.dictionaryValue?[.string("blocked")] == .bool(true) {
+      return Nvim.Response.failure(Nvim.Error(type: .blocked, message: "Nvim is currently blocked."))
+    }
+
+    return fn()
+  }
+
   public func rpc(method: String,
                 params: [Nvim.Value],
                 expectsReturnValue: Bool = true) -> Nvim.Response<Nvim.Value> {
@@ -183,5 +230,5 @@ public class Nvim {
     return self.session.rpc(method: method, params: params, expectsReturnValue: expectsReturnValue)
   }
 
-  fileprivate let session: Session
+  private let session: Session
 }

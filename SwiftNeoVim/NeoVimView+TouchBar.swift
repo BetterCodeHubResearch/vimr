@@ -4,6 +4,7 @@
  */
 
 import Cocoa
+import NvimMsgPack
 
 @available(OSX 10.12.2, *)
 extension NeoVimView : NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDelegate {
@@ -53,7 +54,7 @@ extension NeoVimView : NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDeleg
 
   func updateTouchBarCurrentBuffer() {
     guard let tabsControl = getTabsControl() else { return }
-    tabsCache = self.agent.tabs()
+    tabsCache = self.allTabs()
     tabsControl.reloadData()
     (tabsControl.scrubberLayout as! NSScrubberProportionalLayout).numberOfVisibleItems = tabsControl.numberOfItems > 0 ? tabsControl.numberOfItems : 1
     tabsControl.selectedIndex = selectedTabIndex()
@@ -61,7 +62,7 @@ extension NeoVimView : NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDeleg
 
   func updateTouchBarTab() {
     guard let tabsControl = getTabsControl() else { return }
-    tabsCache = self.agent.tabs()
+    tabsCache = self.allTabs()
     tabsControl.reloadData()
     tabsControl.selectedIndex = selectedTabIndex()
   }
@@ -81,8 +82,11 @@ extension NeoVimView : NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDeleg
 
   public func scrubber(_ scrubber: NSScrubber, didSelectItemAt selectedIndex: Int) {
     let tab = tabsCache[selectedIndex]
-    guard tab.windows.count > 0 else { return }
-    self.agent.select(tab.currentWindow() ?? tab.windows[0])
-  }
+    guard tab.windows.count > 0 else {
+      return
+    }
 
+    let window = tab.currentWindow() ?? tab.windows[0]
+    self.nvim.setCurrentWin(window: Nvim.Window(window.handle), expectsReturnValue: false)
+  }
 }

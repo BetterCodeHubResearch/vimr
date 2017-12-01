@@ -8,9 +8,6 @@
 #import "Logging.h"
 #import "server_globals.h"
 #import "NeoVimServer.h"
-#import "NeoVimBuffer.h"
-#import "NeoVimWindow.h"
-#import "NeoVimTab.h"
 #import "CocoaCategories.h"
 #import "DataWrapper.h"
 
@@ -33,6 +30,7 @@
 #import <nvim/syntax.h>
 #import <nvim/api/window.h>
 #import <nvim/aucmd.h>
+#import <nvim/quickfix.h>
 
 
 #define pun_type(t, x) (*((t *) (&(x))))
@@ -113,10 +111,6 @@ static void refresh_ui_screen(int type) {
 
 static bool has_dirty_docs() {
   FOR_ALL_BUFFERS(buffer) {
-    if (buffer->b_p_bl == 0) {
-      continue;
-    }
-
     if (bufIsChanged(buffer)) {
       return true;
     }
@@ -687,33 +681,6 @@ static NSString *escaped_filename(NSString *filename) {
   return result;
 }
 
-static NeoVimBuffer *buffer_for(buf_T *buf) {
-  // To be sure...
-  if (buf == NULL) {
-    return nil;
-  }
-
-  if (buf->b_p_bl == 0) {
-    return nil;
-  }
-
-  NSString *fileName = nil;
-  if (buf->b_ffname != NULL) {
-    fileName = [NSString stringWithCString:(const char *) buf->b_ffname
-                                  encoding:NSUTF8StringEncoding];
-  }
-
-  bool current = curbuf == buf;
-
-  NeoVimBuffer *buffer = [[NeoVimBuffer alloc] initWithHandle:buf->handle
-                                                unescapedPath:fileName
-                                                        dirty:(bool) buf->b_changed
-                                                     readOnly:(bool) buf->b_p_ro
-                                                      current:current];
-
-  return [buffer autorelease];
-}
-
 void neovim_scroll(void **argv) {
   work_and_write_data_sync(argv, ^NSData *(NSData *data) {
     NSInteger *values = (NSInteger *) data.bytes;
@@ -749,164 +716,6 @@ void neovim_scroll(void **argv) {
   });
 }
 
-void neovim_select_window(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    int handle = ((int *) data.bytes)[0];
-
-    FOR_ALL_TAB_WINDOWS(tab, win) {
-        if (win->handle == handle) {
-          Error err = ERROR_INIT;
-          nvim_set_current_win(win->handle, &err);
-
-          if (ERROR_SET(&err)) {
-            WLOG("Error selecting window with handle %d: %s", win->handle, err.msg);
-            return nil;
-          }
-
-          // nvim_set_current_win() does not seem to trigger a redraw.
-          refresh_ui_screen(0);
-
-          return nil;
-        }
-      }
-
-    return nil;
-  });
-}
-
-void neovim_tabs(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    NSMutableArray *tabs = [[NSMutableArray new] autorelease];
-    FOR_ALL_TABS(t) {
-      NSMutableArray *windows = [NSMutableArray new];
-
-      bool currentTab = curtab ? t->handle == curtab->handle : false;
-      
-      FOR_ALL_WINDOWS_IN_TAB(win, t) {
-        NeoVimBuffer *buffer = buffer_for(win->w_buffer);
-        if (buffer == nil) {
-          continue;
-        }
-
-        bool current = false;
-        // tp_curwin is only valid for tabs that aren't the current one
-        if (currentTab) current = curwin ? win->handle == curwin->handle : false;
-        else if (t->tp_curwin) current = win->handle == t->tp_curwin->handle;
-        NeoVimWindow *window = [[NeoVimWindow alloc] initWithHandle:win->handle buffer:buffer currentInTab:current];
-        [windows addObject:window];
-        [window release];
-      }
-
-      NeoVimTab *tab = [[NeoVimTab alloc] initWithHandle:t->handle windows:windows current:currentTab];
-      [windows release];
-
-      [tabs addObject:tab];
-      [tab release];
-    }
-
-    DLOG("tabs: %s", tabs.description.cstr);
-    return [NSKeyedArchiver archivedDataWithRootObject:tabs];
-  });
-}
-
-void neovim_buffers(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    NSMutableArray *buffers = [[NSMutableArray new] autorelease];
-    FOR_ALL_BUFFERS(buf) {
-      NeoVimBuffer *buffer = buffer_for(buf);
-      if (buffer == nil) {
-        continue;
-      }
-
-      [buffers addObject:buffer];
-    }
-
-    DLOG("buffers: %s", buffers.description.cstr);
-    return [NSKeyedArchiver archivedDataWithRootObject:buffers];
-  });
-}
-
-void neovim_vim_command_output(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    NSString *input = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-    Error err = ERROR_INIT;
-    String commandOutput = nvim_command_output(vim_string_from(input), &err);
-    char_u *output = (char_u *) commandOutput.data;
-
-    // FIXME: handle err.set == true
-    NSString *result = nil;
-    if (output == NULL) {
-      WLOG("vim command output is null");
-    } else if (ERROR_SET(&err)) {
-      WLOG("vim command output for '%s' was not successful: %s", input.cstr, err.msg);
-    } else {
-      result = [[NSString alloc] initWithCString:(const char *) output
-                                        encoding:NSUTF8StringEncoding];
-    }
-
-    NSData *resultData = result == nil ? nil : [NSKeyedArchiver archivedDataWithRootObject:result];
-
-    [result release];
-    [input release];
-
-    return resultData;
-  });
-}
-
-void neovim_set_bool_option(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    bool *optionValues = (bool *) data.bytes;
-    bool optionValue = optionValues[0];
-
-    const char *string = (const char *)(optionValues + 1);
-    NSString *optionName = [[NSString alloc] initWithCString:string encoding:NSUTF8StringEncoding];
-
-    Error err = ERROR_INIT;
-
-    Object object = OBJECT_INIT;
-    object.type = kObjectTypeBoolean;
-    object.data.boolean = optionValue;
-
-    DLOG("%s to set: %d", optionName.cstr, optionValue);
-
-    nvim_set_option(vim_string_from(optionName), object, &err);
-
-    if (ERROR_SET(&err)) {
-      WLOG("Error setting the option '%s' to %d: %s", optionName.cstr, optionValue, err.msg);
-    }
-
-    [optionName release];
-
-    return nil;
-  });
-}
-
-void neovim_get_bool_option(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    NSString *option = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    bool result = false;
-
-    Error err = ERROR_INIT;
-    Object resultObj = nvim_get_option(vim_string_from(option), &err);
-
-    if (ERROR_SET(&err)) {
-      WLOG("Error getting the boolean option '%s': %s", option.cstr, err.msg);
-    }
-
-    if (resultObj.type == kObjectTypeBoolean) {
-      result = resultObj.data.boolean;
-    } else {
-      WLOG("Error got no boolean value, but %d, for option '%s': %s",
-           resultObj.type, option.cstr, err.msg);
-    }
-
-    [option release];
-
-    return [NSKeyedArchiver archivedDataWithRootObject:@(result)];
-  });
-}
-
 void neovim_escaped_filenames(void **argv) {
   work_and_write_data_sync(argv, ^NSData *(NSData *data) {
     NSArray *fileNames = [NSKeyedUnarchiver unarchiveObjectWithData:data];
@@ -917,42 +726,6 @@ void neovim_escaped_filenames(void **argv) {
     }];
 
     return [NSKeyedArchiver archivedDataWithRootObject:result];
-  });
-}
-
-void neovim_has_dirty_docs(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    return [NSKeyedArchiver archivedDataWithRootObject:@(has_dirty_docs())];
-  });
-}
-
-void neovim_resize(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    const int *values = data.bytes;
-    int width = values[0];
-    int height = values[1];
-
-    set_ui_size(_server_ui_data->bridge, width, height);
-    ui_refresh();
-
-    return nil;
-  });
-}
-
-void neovim_vim_command(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    NSString *input = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-    Error err = ERROR_INIT;
-    nvim_command(vim_string_from(input), &err);
-
-    if (ERROR_SET(&err)) {
-      WLOG("ERROR while executing command %s: %s", input.cstr, err.msg);
-    }
-
-    [input release];
-
-    return nil;
   });
 }
 
@@ -1063,39 +836,6 @@ void neovim_pwd(void **argv) {
     NSData *resultData = [NSKeyedArchiver archivedDataWithRootObject:pwd];
 
     return resultData;
-  });
-}
-
-void neovim_cursor_goto(void **argv) {
-  work_and_write_data_sync(argv, ^NSData *(NSData *data) {
-    const int *values = data.bytes;
-
-    Array position = ARRAY_DICT_INIT;
-
-    position.size = 2;
-    position.capacity = 2;
-    position.items = xmalloc(2 * sizeof(Object));
-
-    Object row = OBJECT_INIT;
-    row.type = kObjectTypeInteger;
-    row.data.integer = values[0];
-
-    Object col = OBJECT_INIT;
-    col.type = kObjectTypeInteger;
-    col.data.integer = values[1];
-
-    position.items[0] = row;
-    position.items[1] = col;
-
-    Error err = ERROR_INIT;
-
-    nvim_win_set_cursor(nvim_get_current_win(), position, &err);
-    // The above call seems to be not enough...
-    nvim_input((String) { .data="<ESC>", .size=5 });
-
-    xfree(position.items);
-
-    return nil;
   });
 }
 

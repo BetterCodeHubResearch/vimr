@@ -12,7 +12,10 @@
 @property CFTimeInterval timeout;
 @property (nonatomic, copy, nullable) void (^dataCallback)(NSData * __nonnull);
 
-- (void)run;
+@property (readonly, getter=isRunning) bool running;
+
+- (void)connectAndRun;
+- (void)disconnectAndStop;
 - (CFSocketError)writeData:(NSData * __nonnull)data;
 
 @end
@@ -25,7 +28,8 @@
 
 - (instancetype __nullable)initWithPath:(NSString * __nonnull)path;
 
-- (void)run;
+- (void)connectAndRun;
+- (void)disconnectAndStop;
 - (CFSocketError)writeData:(NSData * __nonnull)data;
 
 @end

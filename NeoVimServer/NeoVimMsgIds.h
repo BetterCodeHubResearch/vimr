@@ -47,24 +47,13 @@ typedef NS_ENUM(NSInteger, NeoVimServerMsgId) {
 
 typedef NS_ENUM(NSInteger, NeoVimAgentMsgId) {
     NeoVimAgentMsgIdAgentReady = 0,
-    NeoVimAgentMsgIdCommand,
-    NeoVimAgentMsgIdCommandOutput,
     NeoVimAgentMsgIdInput,
     NeoVimAgentMsgIdInputMarked,
     NeoVimAgentMsgIdDelete,
-    NeoVimAgentMsgIdResize,
-    NeoVimAgentMsgIdSelectWindow,
     NeoVimAgentMsgIdScroll,
-    NeoVimAgentMsgIdCursorGoto,
 
-    NeoVimAgentMsgIdGetDirtyDocs,
     NeoVimAgentMsgIdGetPwd,
     NeoVimAgentMsgIdGetEscapeFileNames,
-    NeoVimAgentMsgIdGetBuffers,
-    NeoVimAgentMsgIdGetTabs,
-
-    NeoVimAgentMsgIdGetBoolOption,
-    NeoVimAgentMsgIdSetBoolOption,
 
     NeoVimAgentMsgIdFocusGained,
 

@@ -13,25 +13,14 @@ extern CFRunLoopRef _mainRunLoop;
 
 extern void start_neovim(NSInteger width, NSInteger height, NSArray<NSString *> *args);
 
-extern void neovim_select_window(void **argv);
 extern void neovim_scroll(void **argv);
-extern void neovim_tabs(void **argv);
-extern void neovim_buffers(void **argv);
-extern void neovim_vim_command_output(void **argv);
-extern void neovim_set_bool_option(void **argv);
-extern void neovim_get_bool_option(void **argv);
 extern void neovim_escaped_filenames(void **argv);
-extern void neovim_has_dirty_docs(void **argv);
-extern void neovim_resize(void **argv);
-extern void neovim_vim_command(void **argv);
 
 extern void neovim_vim_input(void **argv);
 extern void neovim_vim_input_marked_text(void **argv);
 extern void neovim_delete(void **argv);
 
 extern void neovim_pwd(void **argv);
-
-extern void neovim_cursor_goto(void **argv);
 
 extern void neovim_focus_gained(void **argv);
 

@@ -9,6 +9,6 @@ guard let nvim = Nvim(at: "/tmp/nvim.sock") else {
   preconditionFailure("Could not connect to nvim")
 }
 
-print(nvim.listRuntimePaths())
-let bufs = nvim.listBufs().value
-print(String(describing: bufs?.map({ nvim.bufGetName(buffer: $0) })))
+nvim.connect()
+
+print(nvim.getVar(name: "cwd"))
